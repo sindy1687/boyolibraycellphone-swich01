@@ -5123,10 +5123,14 @@ class LibrarySystem {
     // 顯示通知
     showToast(message, type = 'info') {
         const toast = document.getElementById('toast');
+        if (!toast) {
+            console.log(`Toast (${type}): ${message}`);
+            return;
+        }
         toast.textContent = message;
         toast.className = `toast ${type}`;
         toast.classList.add('show');
-        
+
         setTimeout(() => {
             toast.classList.remove('show');
         }, 3000);
