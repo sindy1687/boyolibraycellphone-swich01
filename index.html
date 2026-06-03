@@ -727,6 +727,14 @@
                     </button>
                 </div>
             </div>
+            <div class="book-type-tabs">
+                <button id="tab-series" class="tab-btn active" onclick="library.switchBookType('series')">
+                    <i class="fas fa-layer-group"></i> 系列書
+                </button>
+                <button id="tab-standalone" class="tab-btn" onclick="library.switchBookType('standalone')">
+                    <i class="fas fa-book"></i> 單本書
+                </button>
+            </div>
             <div id="books-container" class="books-grid">
                 <!-- 書籍將在這裡動態生成 -->
             </div>
@@ -902,6 +910,16 @@
                     <input type="text" id="book-title" placeholder="請輸入完整書名" required>
                 </div>
                 <div class="form-group">
+                    <label for="book-series">
+                        <i class="fas fa-layer-group"></i> 套書：
+                    </label>
+                    <input type="text" id="book-series" placeholder="可留空">
+                    <small class="form-help">
+                        <i class="fas fa-info-circle"></i>
+                        如果這本書屬於某個套書，請填寫套書名稱
+                    </small>
+                </div>
+                <div class="form-group">
                     <label for="book-author">
                         <i class="fas fa-user-pen"></i> 作者：
                     </label>
@@ -974,6 +992,16 @@
                     </div>
                 </div>
                 <div class="form-group">
+                    <label for="edit-book-series">
+                        <i class="fas fa-layer-group"></i> 套書：
+                    </label>
+                    <input type="text" id="edit-book-series" placeholder="可留空">
+                    <small class="form-help">
+                        <i class="fas fa-info-circle"></i>
+                        如果這本書屬於某個套書，請填寫套書名稱
+                    </small>
+                </div>
+                <div class="form-group">
                     <label for="edit-book-author">
                         <i class="fas fa-user-pen"></i> 作者：
                     </label>
@@ -1030,6 +1058,9 @@
                 <button class="tab-btn" onclick="library.switchSettingsTab('user-loan')">
                     <i class="fas fa-user-clock"></i> 使用者借閱時間
                 </button>
+                <button class="tab-btn" onclick="library.switchSettingsTab('sub-admin')">
+                    <i class="fas fa-user-shield"></i> 副管理者管理
+                </button>
             </div>
 
             <!-- 基本設定標籤頁 -->
@@ -1068,7 +1099,7 @@
                             <i class="fas fa-plus"></i> 新增使用者設定
                         </button>
                     </div>
-                    
+
                     <div class="search-section">
                         <input type="text" id="user-loan-search" placeholder="搜尋使用者名稱...">
                         <button class="btn btn-secondary" onclick="library.searchUserLoanSettings()">
@@ -1078,6 +1109,22 @@
 
                     <div id="user-loan-list">
                         <!-- 使用者借閱設定列表將在這裡動態生成 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 副管理者管理標籤頁 -->
+            <div id="sub-admin-settings" class="tab-content">
+                <div class="sub-admin-management">
+                    <div class="section-header">
+                        <h3><i class="fas fa-user-shield"></i> 副管理者管理</h3>
+                        <button class="btn btn-primary" onclick="library.showAddSubAdminModal()">
+                            <i class="fas fa-plus"></i> 新增副管理者
+                        </button>
+                    </div>
+
+                    <div id="sub-admin-list">
+                        <!-- 副管理者列表將在這裡動態生成 -->
                     </div>
                 </div>
             </div>
@@ -1091,531 +1138,60 @@
             <h2><i class="fas fa-user-clock"></i> 設定使用者借閱時間</h2>
             <form id="user-loan-form">
                 <input type="hidden" id="user-loan-editing-index">
-                
+
                 <div class="form-group">
                     <label for="user-loan-username">
                         <i class="fas fa-user"></i> 使用者名稱：
                     </label>
                     <input type="text" id="user-loan-username" placeholder="輸入使用者名稱" required>
-                    <small class="form-help">
-                        <i class="fas fa-info-circle"></i>
-                        請輸入要設定借閱時間的使用者名稱
-                    </small>
                 </div>
-                
+
                 <div class="form-group">
                     <label for="user-loan-days">
-                        <i class="fas fa-calendar-days"></i> 借閱天數：
+                        <i class="fas fa-calendar"></i> 借閱天數：
                     </label>
-                    <input type="number" id="user-loan-days" min="1" max="365" required>
-                    <small class="form-help">
-                        <i class="fas fa-info-circle"></i>
-                        此使用者每次借閱的可借天數（1-365天）
-                    </small>
+                    <input type="number" id="user-loan-days" min="1" value="14" required>
                 </div>
 
                 <div class="form-group">
                     <label for="user-loan-reason">
-                        <i class="fas fa-comment"></i> 設定原因：
+                        <i class="fas fa-comment"></i> 備註原因：
                     </label>
-                    <textarea id="user-loan-reason" rows="3" placeholder="可選：說明設定此借閱時間的原因"></textarea>
+                    <input type="text" id="user-loan-reason" placeholder="可留空">
                 </div>
 
                 <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="this.closest('.modal').style.display='none'">
-                        <i class="fas fa-times"></i> 取消
-                    </button>
-                    <button type="button" id="delete-user-loan-btn" class="btn btn-danger" style="display: none;">
-                        <i class="fas fa-trash"></i> 刪除設定
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save"></i> 儲存設定
-                    </button>
+                    <button type="submit" class="btn btn-primary">儲存</button>
+                    <button type="button" class="btn btn-secondary" id="delete-user-loan-btn" style="display: none;">刪除</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- 修改應還日期模態框 -->
-    <div id="edit-due-date-modal" class="modal">
+    <!-- 副管理者模態框 -->
+    <div id="sub-admin-modal" class="modal">
         <div class="modal-content">
             <span class="close">&times;</span>
-            <h2><i class="fas fa-calendar-edit"></i> 修改應還日期</h2>
-            <form id="edit-due-date-form">
-                <input type="hidden" id="edit-due-date-borrow-id">
-                
+            <h2><i class="fas fa-user-shield"></i> 新增副管理者</h2>
+            <form id="sub-admin-form">
                 <div class="form-group">
-                    <label>
-                        <i class="fas fa-book"></i> 書籍資訊：
+                    <label for="sub-admin-username">
+                        <i class="fas fa-user"></i> 副管理者名稱：
                     </label>
-                    <div id="edit-due-date-book-info" style="padding: 10px; background: #f8f9fa; border-radius: 6px; margin-bottom: 15px;">
-                        <!-- 書籍資訊將在這裡動態生成 -->
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-borrow-date">
-                        <i class="fas fa-calendar-plus"></i> 新的借閱日期：
-                    </label>
-                    <input type="date" id="edit-borrow-date" required>
+                    <input type="text" id="sub-admin-username" placeholder="輸入副管理者名稱" required>
                     <small class="form-help">
                         <i class="fas fa-info-circle"></i>
-                        請選擇新的借閱日期
+                        副管理者可以新增、編輯書籍並上傳到 Google Sheet
                     </small>
                 </div>
 
-                <div class="form-group">
-                    <label for="edit-due-date">
-                        <i class="fas fa-calendar-check"></i> 新的應還日期：
-                    </label>
-                    <input type="date" id="edit-due-date" required>
-                    <small class="form-help">
-                        <i class="fas fa-info-circle"></i>
-                        請選擇新的應還日期
-                    </small>
-                </div>
-
-                <div class="form-group">
-                    <label for="edit-due-date-reason">
-                        <i class="fas fa-comment"></i> 修改原因：
-                    </label>
-                    <textarea id="edit-due-date-reason" rows="3" placeholder="請說明修改應還日期的原因"></textarea>
-                </div>
-
                 <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="this.closest('.modal').style.display='none'">
-                        <i class="fas fa-times"></i> 取消
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save"></i> 儲存修改
-                    </button>
+                    <button type="submit" class="btn btn-primary">新增</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- 選擇借閱書碼模態框 -->
-    <div id="choose-copy-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-list-check"></i> 選擇要借的書碼</h2>
-            <input type="hidden" id="choose-copy-selected">
-
-            <div class="form-group">
-                <label>
-                    <i class="fas fa-book"></i> 書籍資訊：
-                </label>
-                <div id="choose-copy-book-info" style="padding: 10px; background: #f8f9fa; border-radius: 6px; margin-bottom: 15px;"></div>
-            </div>
-
-            <div class="form-group">
-                <label>
-                    <i class="fas fa-barcode"></i> 可借書碼：
-                </label>
-                <div id="choose-copy-list" style="display: flex; flex-wrap: wrap; gap: 10px;"></div>
-            </div>
-
-            <div class="form-actions">
-                <button type="button" id="choose-copy-cancel" class="btn btn-outline">
-                    <i class="fas fa-times"></i> 取消
-                </button>
-                <button type="button" id="choose-copy-confirm" class="btn btn-primary">
-                    <i class="fas fa-check"></i> 確認借閱
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 借閱者清單模態框 -->
-    <div id="borrowers-list-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-users"></i> 借閱者清單</h2>
-            
-            <div class="borrowers-management">
-                <div class="section-header">
-                    <h3><i class="fas fa-user-friends"></i> 目前借閱者</h3>
-                    <div class="borrowers-stats">
-                        <span id="total-borrowers-count">0 位借閱者</span>
-                    </div>
-                </div>
-                
-                <div class="search-section">
-                    <input type="text" id="borrowers-search" placeholder="搜尋借閱者姓名或電話...">
-                    <button class="btn btn-secondary" onclick="library.searchBorrowers()">
-                        <i class="fas fa-search"></i> 搜尋
-                    </button>
-                    <button class="btn btn-warning" onclick="library.showOverdueBorrowers()">
-                        <i class="fas fa-exclamation-triangle"></i> 逾期借閱者
-                    </button>
-                </div>
-
-                <div id="borrowers-list">
-                    <!-- 借閱者列表將在這裡動態生成 -->
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 逾期通知模態框 -->
-    <div id="overdue-notification-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-bell"></i> 逾期通知</h2>
-            <form id="overdue-notification-form">
-                <input type="hidden" id="notification-borrower-id">
-                
-                <div class="form-group">
-                    <label>
-                        <i class="fas fa-user"></i> 借閱者資訊：
-                    </label>
-                    <div id="notification-borrower-info" style="padding: 10px; background: #fff3cd; border-radius: 6px; margin-bottom: 15px;">
-                        <!-- 借閱者資訊將在這裡動態生成 -->
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="notification-method">
-                        <i class="fas fa-paper-plane"></i> 通知方式：
-                    </label>
-                    <select id="notification-method" required>
-                        <option value="phone">電話通知</option>
-                        <option value="sms">簡訊通知</option>
-                        <option value="email">電子郵件通知</option>
-                        <option value="in-person">當面通知</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="notification-message">
-                        <i class="fas fa-comment"></i> 通知內容：
-                    </label>
-                    <textarea id="notification-message" rows="4" required></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="notification-status">
-                        <i class="fas fa-check-circle"></i> 通知狀態：
-                    </label>
-                    <select id="notification-status" required>
-                        <option value="pending">待通知</option>
-                        <option value="notified">已通知</option>
-                        <option value="resolved">已處理</option>
-                    </select>
-                </div>
-
-                <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="this.closest('.modal').style.display='none'">
-                        <i class="fas fa-times"></i> 取消
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save"></i> 儲存通知記錄
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- 身分審核管理模態框 -->
-    <div id="staff-approval-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-user-check"></i> 身分審核管理</h2>
-            
-            <div class="approval-management">
-                <div class="section-header">
-                    <h3><i class="fas fa-clock"></i> 待審核申請</h3>
-                    <div class="approval-stats">
-                        <span id="pending-approval-count">0 筆待審核</span>
-                    </div>
-                </div>
-                
-                <div class="search-section">
-                    <input type="text" id="approval-search" placeholder="搜尋申請人姓名或電話...">
-                    <button class="btn btn-secondary" onclick="library.searchApplications()">
-                        <i class="fas fa-search"></i> 搜尋
-                    </button>
-                    <button class="btn btn-success" onclick="library.syncApplicationsToGoogle()">
-                        <i class="fas fa-cloud-upload-alt"></i> 同步到 Google Sheets
-                    </button>
-                </div>
-
-                <div id="applications-list">
-                    <!-- 申請列表將在這裡動態生成 -->
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 審核詳情模態框 -->
-    <div id="approval-detail-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-user-edit"></i> 審核申請</h2>
-            <form id="approval-form">
-                <input type="hidden" id="approval-application-id">
-                
-                <div class="form-group">
-                    <label>
-                        <i class="fas fa-user"></i> 申請人資訊：
-                    </label>
-                    <div id="approval-applicant-info" style="padding: 10px; background: #f8f9fa; border-radius: 6px; margin-bottom: 15px;">
-                        <!-- 申請人資訊將在這裡動態生成 -->
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="approval-decision">
-                        <i class="fas fa-gavel"></i> 審核決定：
-                    </label>
-                    <select id="approval-decision" required>
-                        <option value="">請選擇審核結果</option>
-                        <option value="approved">通過</option>
-                        <option value="rejected">拒絕</option>
-                        <option value="pending">保留待審</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="approval-reason">
-                        <i class="fas fa-comment"></i> 審核意見：
-                    </label>
-                    <textarea id="approval-reason" rows="4" placeholder="請輸入審核意見或原因..."></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label for="approval-note">
-                        <i class="fas fa-sticky-note"></i> 備註：
-                    </label>
-                    <textarea id="approval-note" rows="2" placeholder="其他備註資訊..."></textarea>
-                </div>
-
-                <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="this.closest('.modal').style.display='none'">
-                        <i class="fas fa-times"></i> 取消
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save"></i> 儲存審核結果
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- 刪除身分模態框 -->
-    <div id="delete-identity-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-user-times"></i> 刪除身分</h2>
-            
-            <div class="delete-identity-management">
-                <div class="section-header">
-                    <h3><i class="fas fa-users"></i> 使用者列表</h3>
-                    <div class="identity-stats">
-                        <span id="total-users-count">0 位使用者</span>
-                    </div>
-                </div>
-                
-                <div class="search-section">
-                    <input type="text" id="identity-search" placeholder="搜尋使用者姓名或帳號...">
-                    <button class="btn btn-secondary" onclick="library.searchIdentities()">
-                        <i class="fas fa-search"></i> 搜尋
-                    </button>
-                    <button class="btn btn-warning" onclick="library.refreshIdentityList()">
-                        <i class="fas fa-sync"></i> 重新整理
-                    </button>
-                </div>
-
-                <div id="identity-list">
-                    <!-- 使用者列表將在這裡動態生成 -->
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 確認刪除模態框 -->
-    <div id="confirm-delete-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-exclamation-triangle"></i> 確認刪除</h2>
-            
-            <form id="confirm-delete-form">
-                <input type="hidden" id="delete-username">
-                
-                <div class="form-group">
-                    <label>
-                        <i class="fas fa-user"></i> 使用者資訊：
-                    </label>
-                    <div id="delete-user-info" style="padding: 10px; background: #fee2e2; border-radius: 6px; margin-bottom: 15px;">
-                        <!-- 使用者資訊將在這裡動態生成 -->
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="delete-reason">
-                        <i class="fas fa-comment"></i> 刪除原因：
-                    </label>
-                    <textarea id="delete-reason" rows="3" placeholder="請輸入刪除原因..." required></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>
-                        <i class="fas fa-exclamation-triangle"></i> 刪除後果：
-                    </label>
-                    <div style="padding: 10px; background: #fef3c7; border-radius: 6px; margin-bottom: 15px;">
-                        <ul style="margin: 0; padding-left: 20px;">
-                            <li>使用者帳號將被永久刪除</li>
-                            <li>相關的借閱記錄將被保留但無法歸還</li>
-                            <li>身分申請記錄將被刪除</li>
-                            <li>使用者將無法再登入系統</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="this.closest('.modal').style.display='none'">
-                        <i class="fas fa-times"></i> 取消
-                    </button>
-                    <button type="submit" class="btn btn-danger">
-                        <i class="fas fa-trash"></i> 確認刪除
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Google Sheets 同步模態框 -->
-    <div id="google-sync-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Google Sheets 同步</h2>
-            <form id="google-sync-form">
-                <div class="form-group">
-                    <label for="google-webapp-url">Apps Script Web App URL：</label>
-                    <input type="url" id="google-webapp-url" placeholder="https://script.google.com/macros/s/.../exec" required>
-                    <small class="form-help">
-                        <i class="fas fa-info-circle"></i>
-                        需先部署 Google Apps Script 成 Web App，並允許存取。此功能會同步：館藏、博幼藏書、借閱資料。
-                    </small>
-                </div>
-                <div class="form-actions">
-                    <button type="button" id="google-pull-btn" class="btn btn-info">
-                        <i class="fas fa-cloud-download-alt"></i> 從線上下載
-                    </button>
-                    <button type="button" id="google-push-btn" class="btn btn-success">
-                        <i class="fas fa-cloud-upload-alt"></i> 上傳到線上
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- 一鍵搜尋封面模態框 -->
-    <div id="fetch-covers-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2><i class="fas fa-images"></i> 一鍵搜尋封面</h2>
-            <form id="fetch-covers-form">
-                <div class="form-group">
-                    <label for="fetch-range">
-                        <i class="fas fa-filter"></i> 搜尋範圍：
-                    </label>
-                    <select id="fetch-range" required>
-                        <option value="all">全部書籍</option>
-                        <option value="range">指定範圍</option>
-                        <option value="genre">按類別</option>
-                    </select>
-                </div>
-                
-                <div id="range-options" style="display: none;">
-                    <div class="form-group">
-                        <label for="range-start">
-                            <i class="fas fa-play"></i> 起始書碼：
-                        </label>
-                        <input type="text" id="range-start" placeholder="例：A0001">
-                    </div>
-                    <div class="form-group">
-                        <label for="range-end">
-                            <i class="fas fa-stop"></i> 結束書碼：
-                        </label>
-                        <input type="text" id="range-end" placeholder="例：A0100">
-                    </div>
-                </div>
-                
-                <div id="genre-options" style="display: none;">
-                    <div class="form-group">
-                        <label for="fetch-genre">
-                            <i class="fas fa-tags"></i> 類別：
-                        </label>
-                        <select id="fetch-genre">
-                            <option value="繪本">繪本 (A)</option>
-                            <option value="橋梁書">橋梁書 (B)</option>
-                            <option value="文字書">文字書 (C)</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="fetch-type">
-                        <i class="fas fa-search"></i> 搜尋類型：
-                    </label>
-                    <div style="display: flex; gap: 15px;">
-                        <label style="display: flex; align-items: center; gap: 5px;">
-                            <input type="checkbox" id="fetch-covers" checked>
-                            <span>搜尋封面</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 5px;">
-                            <input type="checkbox" id="fetch-authors" checked>
-                            <span>搜尋作者</span>
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn btn-outline" onclick="this.closest('.modal').style.display='none'">
-                        <i class="fas fa-times"></i> 取消
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-search"></i> 開始搜尋
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- 搜尋進度模態框 -->
-    <div id="search-progress-modal" class="modal">
-        <div class="modal-content">
-            <h2><i class="fas fa-spinner fa-spin"></i> 搜尋進度</h2>
-            <div class="progress-container">
-                <div class="progress-info">
-                    <div>目前處理：<span id="current-book-title">-</span></div>
-                    <div>進度：<span id="progress-count">0</span> / <span id="progress-total">0</span></div>
-                    <div>成功：<span id="success-count">0</span> | 失敗：<span id="fail-count">0</span></div>
-                </div>
-                <div class="progress-bar">
-                    <div id="progress-fill" class="progress-fill"></div>
-                </div>
-                <div class="progress-controls">
-                    <button id="pause-search-btn" class="btn btn-warning">
-                        <i class="fas fa-pause"></i> 暫停
-                    </button>
-                    <button id="resume-search-btn" class="btn btn-success" style="display: none;">
-                        <i class="fas fa-play"></i> 繼續
-                    </button>
-                    <button id="stop-search-btn" class="btn btn-danger">
-                        <i class="fas fa-stop"></i> 停止
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Toast 通知 -->
-    <div id="toast" class="toast"></div>
-
-    <!-- 載入外部函式庫 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
