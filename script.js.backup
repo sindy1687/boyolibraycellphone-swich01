@@ -69,6 +69,12 @@ class LibrarySystem {
         this.updateUserDisplay();
         this.updateAdminControls();
         this.startAutoUpdate();
+        // 每次進入網頁時觸發同步（管理者同步全部；一般使用者同步借閱記錄）
+        try {
+            this.triggerSyncForAction('enter');
+        } catch (e) {
+            console.error('enter sync failed:', e);
+        }
     }
 
     isAdminUser() {
@@ -129,7 +135,7 @@ class LibrarySystem {
             await this.pushToGoogleSheets({ silent: true });
         } catch (e) {
             console.error('pushToGoogleSheetsNow error:', e);
-        } finally {
+            const hadLocalBooks = Array.isArray(this.books) && this.books.length > 0;
             this.pushNowInFlight = false;
         }
     }
@@ -138,6 +144,15 @@ class LibrarySystem {
         const url = (this.settings?.googleWebAppUrl || '').trim();
         return url || null;
     }
+            if (!hadLocalBooks && Array.isArray(this.books) && this.books.length > 0) {
+                try {
+                    localStorage.setItem('lib_initial_import_done', '1');
+                    this.triggerSyncForAction('addBook');
+                } catch (e) {
+                    console.error('首次匯入後觸發同步失敗:', e);
+                }
+            }
+
 
     startAutoPull() {
         const url = this.getGoogleWebAppUrl();
@@ -164,6 +179,34 @@ class LibrarySystem {
             this.autoSyncTimer = null;
             this.autoPushToGoogleSheets();
         }, this.autoSyncDebounceMs);
+    }
+
+    // 根據動作類型決定是否要觸發同步（僅在會變更館藏資料的動作才同步）
+    triggerSyncForAction(action) {
+        const allowedActions = [
+            'addBook',
+            'editBook',
+            'deleteBook',
+            'importBooks',
+            'bulkImport',
+            'saveSettings',
+            'enter',
+            'borrow',
+            'return'
+        ];
+
+        try {
+            if (!allowedActions.includes(action)) {
+                // 非同步範圍的動作，跳過自動上傳
+                return;
+            }
+
+            // 若允許，排程並立刻嘗試上傳（靜默模式）
+            this.scheduleAutoSync();
+            this.pushToGoogleSheetsNow();
+        } catch (e) {
+            console.error('triggerSyncForAction error:', e);
+        }
     }
 
     async autoPushToGoogleSheets() {
@@ -817,12 +860,18 @@ class LibrarySystem {
         try {
             if (!silent) this.showToast('正在上傳到 Google Sheets...', 'info');
             const boyouBooks = JSON.parse(localStorage.getItem('lib_boyou_books_v1') || 'null') || {};
+            const normalizedBooks = (Array.isArray(this.books) ? this.books : []).map(b => ({
+                ...b,
+                series: b.series || '',
+                createdAt: b.createdAt || b.addedAt || ''
+            }));
+
             const response = await fetch(url, {
                 method: 'POST',
                 body: JSON.stringify({
                     action: 'push',
                     payload: {
-                        books: this.books,
+                        books: normalizedBooks,
                         borrowedBooks: this.borrowedBooks,
                         boyouBooks
                     }
@@ -1436,9 +1485,8 @@ class LibrarySystem {
 
             this.books.push(newBook);
             this.saveData();
-            // 新增館藏後也自動同步到 Google Sheets
-            this.scheduleAutoSync();
-            this.pushToGoogleSheetsNow();
+            // 新增館藏後才觸發同步（僅限動作變更）
+            this.triggerSyncForAction('addBook');
             this.renderBooks();
             this.updateStats();
 
@@ -1601,6 +1649,7 @@ class LibrarySystem {
         const booksWithSeriesInfo = books.map(book => ({
             ...book,
             cleanTitle: this.cleanTitle(book.title),
+            seriesKey: this.getSeriesKey(book.title),
             hasSeriesMarkers: /[（(].*?[）)]|\d+.*$|[第].*?[卷冊部集]|[上下中].*$|[全].*$/.test(book.title)
         }));
         
@@ -1624,8 +1673,29 @@ class LibrarySystem {
         // 處理系列書籍（至少2本才算系列）
         seriesMap.forEach((seriesBooks, seriesName) => {
             if (seriesBooks.length >= 2) {
-                // 按書名排序系列內的書籍（尊重升冪/降冪）
-                seriesBooks.sort((a, b) => this.smartTitleSort(a.title, b.title, sortOrder));
+                // 系列內書籍排序：嘗試把系列「第一本」放在最前面
+                seriesBooks.sort((a, b) => {
+                    const extractIndex = (title) => {
+                        if (!title) return NaN;
+                        const m = String(title).match(/(\d{1,4})/);
+                        if (m) return parseInt(m[1], 10);
+                        return NaN;
+                    };
+
+                    const aIdx = extractIndex(a.title);
+                    const bIdx = extractIndex(b.title);
+                    if (!Number.isNaN(aIdx) && !Number.isNaN(bIdx)) {
+                        if (aIdx !== bIdx) return aIdx - bIdx;
+                    }
+
+                    const aTime = new Date(a.createdAt || a.addedAt || 0).getTime();
+                    const bTime = new Date(b.createdAt || b.addedAt || 0).getTime();
+                    if (aTime && bTime && aTime !== bTime) {
+                        return aTime - bTime;
+                    }
+
+                    return this.smartTitleSort(a.title, b.title, sortOrder);
+                });
                 sortedBooks.push(...seriesBooks);
             } else {
                 // 單本書籍加入獨立書籍
@@ -1784,9 +1854,8 @@ class LibrarySystem {
         book.availableCopies--;
 
         this.saveData();
-        // 所有使用者：只要借閱成功就自動上傳到 Google Sheets
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        // 借閱不觸發館藏同步（僅保留本機變更）
+        this.triggerSyncForAction('borrow');
         this.renderBooks();
         this.renderBorrowedBooks();
         this.updateStats();
@@ -1814,9 +1883,8 @@ class LibrarySystem {
         }
 
         this.saveData();
-        // 所有使用者：只要歸還成功也自動上傳到 Google Sheets
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        // 歸還不觸發館藏同步
+        this.triggerSyncForAction('return');
         this.renderBooks();
         this.renderBorrowedBooks();
         this.updateStats();
@@ -3317,9 +3385,8 @@ class LibrarySystem {
         // 顯示結果
         this.showToast(`搜尋完成！成功: ${this.searchState.successCount}, 失敗: ${this.searchState.failCount}`, 'success');
         
-        // 自動同步到 Google Sheets
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        // 搜尋完成不會觸發館藏同步（若需要可改為 'bulkImport'）
+        this.triggerSyncForAction('search');
     }
 
     // 搜尋書籍作者

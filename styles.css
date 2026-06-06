@@ -338,14 +338,15 @@ input {
 .book-card.merged .book-id::after {
     content: "多本";
     position: absolute;
-    top: -8px;
-    right: -8px;
+    top: -5px;
+    right: -5px;
     background: #ff6b6b;
     color: white;
     font-size: 0.6rem;
     padding: 2px 4px;
     border-radius: 8px;
     font-weight: bold;
+    z-index: 1;
 }
 
 /* 更新狀態面板 */

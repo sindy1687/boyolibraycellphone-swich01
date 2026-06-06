@@ -50,11 +50,191 @@ class LibrarySystem {
             subAdmins: [
                 { username: 'boyo1314', createdAt: new Date().toISOString() }
             ] // 副管理者列表
+            ,
+            seriesList: [] // 可在設定中維護的系列名稱清單（預設空）
         };
         this.updateTimer = null;
         this.lastUpdateTime = null;
         
+        // 快取系統狀態
+        this.cacheVersion = null;
+        this.lastCacheDownloadDate = null;
+        
         this.init();
+    }
+
+    // ==================== 快取系統函數 ====================
+    
+    /**
+     * 初始化快取系統 - 從 localStorage 讀取快取狀態
+     */
+    initCacheSystem() {
+        this.cacheVersion = localStorage.getItem('lib_cache_version') || null;
+        this.lastCacheDownloadDate = localStorage.getItem('lib_cache_download_date') || null;
+    }
+
+    /**
+     * 取得書單快取鍵名
+     */
+    getBookListCacheKey() {
+        return 'lib_books_cache_v1';
+    }
+
+    /**
+     * 取得書單版本鍵名
+     */
+    getBookListVersionKey() {
+        return 'lib_books_version';
+    }
+
+    /**
+     * 取得上次下載日期鍵名
+     */
+    getLastDownloadDateKey() {
+        return 'lib_cache_download_date';
+    }
+
+    /**
+     * 檢查是否應該從雲端更新書單
+     * 邏輯：
+     * 1. 如果今天還沒下載過，需要下載
+     * 2. 如果版本信息不同，需要下載
+     * 3. 否則使用快取
+     */
+    async checkShouldUpdateBookList() {
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 格式
+        const lastDownloadDate = localStorage.getItem(this.getLastDownloadDateKey());
+        
+        // 今天第一次進入網站，需要下載
+        if (lastDownloadDate !== today) {
+            console.log(`[快取] 今天第一次進入，需要下載。上次下載日期: ${lastDownloadDate}, 今天: ${today}`);
+            return true;
+        }
+        
+        // 今天已下載過，檢查版本是否有更新
+        const localVersion = localStorage.getItem('lib_cache_version');
+        
+        // 嘗試從雲端取得版本信息
+        try {
+            const url = this.getGoogleWebAppUrl();
+            if (!url) {
+                console.log('[快取] 未設定 Google Sheets URL，使用本地快取');
+                return false;
+            }
+
+            // 嘗試獲取版本信息（需要 Google Sheets 應用程式支持 getVersion 操作）
+            const response = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'getVersion' })
+            });
+
+            const result = await response.json().catch(() => null);
+            
+            // 如果響應中有版本信息，比較版本
+            if (result && result.data && result.data.version) {
+                const remoteVersion = result.data.version;
+                
+                if (remoteVersion && remoteVersion !== localVersion) {
+                    console.log(`[快取] 版本有更新。本地: ${localVersion}, 雲端: ${remoteVersion}`);
+                    return true;
+                }
+                
+                console.log(`[快取] 版本未變更，使用本地快取。版本: ${localVersion}`);
+                return false;
+            } else {
+                // 如果無法獲取版本信息，但已有本地快取和版本記錄，則使用快取
+                if (localVersion) {
+                    console.log('[快取] 無法獲取遠端版本，但已有本地快取，繼續使用');
+                    return false;
+                }
+                
+                // 如果沒有本地版本記錄，需要下載
+                console.log('[快取] 沒有本地版本記錄，需要下載');
+                return true;
+            }
+        } catch (error) {
+            console.log('[快取] 版本檢查失敗，使用本地快取:', error.message);
+            
+            // 如果檢查失敗但有本地快取，使用快取
+            if (localVersion) {
+                console.log('[快取] 使用本地快取版本:', localVersion);
+                return false;
+            }
+            
+            // 如果沒有本地快取，需要嘗試下載
+            return false;
+        }
+    }
+
+    /**
+     * 保存書單到快取
+     */
+    saveBookListCache(books, borrowedBooks) {
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 格式
+        localStorage.setItem(this.getBookListCacheKey(), JSON.stringify(books));
+        localStorage.setItem(this.getLastDownloadDateKey(), today);
+        console.log(`[快取] 已保存書單快取，日期: ${today}, 書籍數: ${books.length}`);
+    }
+
+    /**
+     * 從快取加載書單
+     */
+    loadBookListCache() {
+        try {
+            const cachedBooks = localStorage.getItem(this.getBookListCacheKey());
+            if (!cachedBooks) {
+                console.log('[快取] 未找到快取的書單');
+                return null;
+            }
+            
+            const books = JSON.parse(cachedBooks);
+            const downloadDate = localStorage.getItem(this.getLastDownloadDateKey());
+            console.log(`[快取] 成功加載快取書單，書籍數: ${books.length}, 快取日期: ${downloadDate}`);
+            return books;
+        } catch (error) {
+            console.error('[快取] 加載快取失敗:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 更新書單版本時間戳 - 管理員新增/修改/刪除書籍後調用
+     * @param {string} timestamp - 版本時間戳（ISO 格式），若不提供則使用當前時間
+     */
+    updateBookListVersion(timestamp = null) {
+        const version = timestamp || new Date().toISOString();
+        localStorage.setItem('lib_cache_version', version);
+        this.cacheVersion = version;
+        console.log(`[快取] 已更新書單版本: ${version}`);
+    }
+
+    /**
+     * 清除書單快取 - 強制重新下載
+     */
+    clearBookListCache() {
+        localStorage.removeItem(this.getBookListCacheKey());
+        localStorage.removeItem(this.getLastDownloadDateKey());
+        localStorage.removeItem('lib_cache_version');
+        this.cacheVersion = null;
+        this.lastCacheDownloadDate = null;
+        console.log('[快取] 已清除書單快取');
+    }
+
+    /**
+     * 取得快取狀態信息
+     */
+    getCacheStatus() {
+        const downloadDate = localStorage.getItem(this.getLastDownloadDateKey());
+        const version = localStorage.getItem('lib_cache_version');
+        const today = new Date().toISOString().split('T')[0];
+        const isCacheValid = downloadDate === today;
+        
+        return {
+            downloadDate,
+            version,
+            isCacheValid,
+            today
+        };
     }
 
     escapeHtml(value) {
@@ -109,27 +289,48 @@ class LibrarySystem {
     }
 
     // 從書名判斷系列名稱
+    // 自動推斷套書名稱（從書名中提取共同開頭）
+    autoInferSeriesName(book) {
+        const title = book.title || book.name || book['書名'] || '';
+
+        if (!title) return null;
+
+        // 嘗試提取共同開頭（例如「小天使1 我們一起做成有之類」→「小天使」）
+        // 先匹配「名稱+數字」的格式
+        const match = title.match(/^([^\d\s]+)\s*\d+/);
+        if (match && match[1] && match[1].length >= 3) {
+            return match[1];
+        }
+
+        // 如果沒有匹配到，嘗試移除數字和標記
+        let seriesName = title
+            .replace(/[0-9０-９]+/g, '') // 移除所有數字
+            .replace(/[第][一二三四五六七八九十百千0-9０-９]*[集冊卷本部季屆]/g, '') // 移除「第X集/冊/卷/本/部/季/屆」或「第卷」
+            .replace(/[集冊卷本部季屆]/g, '') // 移除單獨的「集/冊/卷/本/部/季/屆」
+            .replace(/[上下中左右]/g, '') // 移除「上下中左右」
+            .replace(/[（(].*?[）)]/g, '') // 移除括號內的內容
+            .replace(/【.*?】/g, '') // 移除【】內的內容
+            .replace(/[IVX]+/g, '') // 移除羅馬數字
+            .replace(/首部曲|二部曲|三部曲|四部曲|終部曲/g, '') // 移除部曲
+            .replace(/[：:－\-].*$/g, '') // 移除冒號後的內容
+            .replace(/\s+/g, '') // 移除所有空格
+            .trim();
+
+        // 如果移除後的結果太短或為空，返回 null
+        if (!seriesName || seriesName.length < 3) {
+            return null;
+        }
+
+        return seriesName;
+    }
+
     getSeriesName(book) {
         const title = book.title || book.name || book['書名'] || '';
 
-        // 常見套書名稱列表（優先匹配）
-        const commonSeriesNames = [
-            '神奇樹屋', '哈利波特', '妖怪新聞社', '漫畫小叮噹',
-            '名偵探柯南', '海賊王', '火影忍者', '七龍珠',
-            '灌籃高手', '哆啦A夢', '蜡筆小新', '蠟筆小新',
-            '盜墓筆記', '林榮三文學獎', '安徒生故事全集', '手斧男孩',
-            '3個問號偵探團', '山雨小學', '不偷懶小學', '少年科學偵探CSI',
-            '可能小學的西洋文明任務', '可能小學歷史任務', '尼古拉回來了',
-            '用點心學校', '成語小劇場', '尋找保麗龍君', '偉的奇怪報告',
-            '妖怪出租', '屁屁偵探', '找不到系列', '找不到國小',
-            '汪喵偵探', '來自星星小偵探', '垃圾桶偵探鴿五郎',
-            '奇幻精靈事件簿', '奇想西遊記', '怪咖教室',
-            '阿當這隻貪吃的貓', '歪歪小學', '丁小飛校園日記'
-        ];
-
-        // 檢查是否包含常見套書名稱
+        // 常見套書名稱改由設定 `this.settings.seriesList` 提供（預設空）
+        const commonSeriesNames = Array.isArray(this.settings.seriesList) ? this.settings.seriesList : [];
         for (const seriesName of commonSeriesNames) {
-            if (title.includes(seriesName)) {
+            if (seriesName && title.includes(seriesName)) {
                 return seriesName;
             }
         }
@@ -146,6 +347,26 @@ class LibrarySystem {
             .replace(/[：:－\-].*$/g, '') // 移除冒號後的內容
             .replace(/\s+/g, '') // 移除所有空格
             .trim() || '其他書籍';
+    }
+
+    normalizeSeriesName(name) {
+        return String(name || '')
+            .trim()
+            .replace(/[\u3000\s]+/g, ' ')
+            .replace(/[：:]/g, ' ')
+            .replace(/[-–—_]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    getDisplaySeriesName(book) {
+        const manualSeries = book.series && String(book.series).trim();
+        if (manualSeries) {
+            return this.normalizeSeriesName(manualSeries);
+        }
+
+        const inferred = this.autoInferSeriesName(book) || this.getSeriesName(book);
+        return this.normalizeSeriesName(inferred) || '單本書';
     }
 
     // 偵測相似套書格式
@@ -171,22 +392,29 @@ class LibrarySystem {
         const groups = {};
 
         books.forEach(book => {
-            const seriesName =
-                book.series ||
-                book.seriesName ||
-                book.bookSeries ||
-                book['系列'] ||
-                book['系列名稱'] ||
-                this.getSeriesName(book);
-
+            const seriesName = this.getDisplaySeriesName(book);
             if (!groups[seriesName]) {
                 groups[seriesName] = [];
             }
-
             groups[seriesName].push(book);
         });
 
-        return groups;
+        const finalGroups = {};
+        Object.keys(groups).forEach(seriesName => {
+            const booksInGroup = groups[seriesName];
+            const isSingleBookGroup = booksInGroup.length < 2;
+
+            if (seriesName === '單本書' || isSingleBookGroup) {
+                if (!finalGroups['單本書']) {
+                    finalGroups['單本書'] = [];
+                }
+                finalGroups['單本書'].push(...booksInGroup);
+            } else {
+                finalGroups[seriesName] = booksInGroup;
+            }
+        });
+
+        return finalGroups;
     }
 
     // 直接輸入書碼借閱
@@ -225,6 +453,7 @@ class LibrarySystem {
     // 初始化系統
     init() {
         this.loadData();
+        this.initCacheSystem(); // 初始化快取系統
         this.setupEventListeners();
         this.syncBorrowedPanelForViewport();
         this.syncAppHeaderHeight();
@@ -240,6 +469,12 @@ class LibrarySystem {
         this.updateUserDisplay();
         this.updateAdminControls();
         this.startAutoUpdate();
+        // 每次進入網頁時觸發同步（管理者同步全部；一般使用者同步借閱記錄）
+        try {
+            this.triggerSyncForAction('enter');
+        } catch (e) {
+            console.error('enter sync failed:', e);
+        }
     }
 
     isAdminUser() {
@@ -368,8 +603,7 @@ class LibrarySystem {
 
         this.books.push(newBook);
         this.saveData();
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        this.triggerSyncForAction('addBook');
         this.renderBooks();
         this.updateStats();
         this.showToast(`已新增複本：${newId}`, 'success');
@@ -484,6 +718,34 @@ class LibrarySystem {
         }, this.autoSyncDebounceMs);
     }
 
+    // 根據動作類型決定是否要觸發同步（僅在會變更館藏資料的動作才同步）
+    triggerSyncForAction(action) {
+        const allowedActions = [
+            'addBook',
+            'editBook',
+            'deleteBook',
+            'importBooks',
+            'bulkImport',
+            'saveSettings',
+            'enter',
+            'borrow',
+            'return'
+        ];
+
+        try {
+            if (!allowedActions.includes(action)) {
+                // 非同步範圍的動作，跳過自動上傳
+                return;
+            }
+
+            // 若允許，排程並立刻嘗試上傳（靜默模式）
+            this.scheduleAutoSync();
+            this.pushToGoogleSheetsNow();
+        } catch (e) {
+            console.error('triggerSyncForAction error:', e);
+        }
+    }
+
     async autoPushToGoogleSheets() {
         // 管理員可以執行完整自動上傳，一般使用者只能自動上傳借閱記錄
         const url = this.getGoogleWebAppUrl();
@@ -579,6 +841,7 @@ class LibrarySystem {
         if (settingsBtn) settingsBtn.addEventListener('click', () => this.showSettingsModal());
         document.getElementById('google-sync-btn').addEventListener('click', () => this.showGoogleSyncModal());
         document.getElementById('google-load-btn').addEventListener('click', () => this.loadFromGoogleSheets());
+        document.getElementById('refresh-booklist-btn').addEventListener('click', () => this.refreshBookList());
         document.getElementById('file-input').addEventListener('change', (e) => this.importBooks(e));
         document.getElementById('add-book-btn').addEventListener('click', () => this.showAddBookModal());
         document.getElementById('fetch-all-covers-btn').addEventListener('click', () => this.showFetchCoversModal());
@@ -993,6 +1256,8 @@ class LibrarySystem {
             ...book,
             createdAt: book.createdAt || new Date(Number(book.addedAt) || Date.now() - index).toISOString()
         }));
+
+        this.saveData();
     }
 
     updateBorrowedToggleIcon() {
@@ -1085,7 +1350,7 @@ class LibrarySystem {
                 }
             });
             this.books = Array.from(bookMap.values());
-            this.borrowedBooks = Array.isArray(data.borrowedBooks) ? data.borrowedBooks : [];
+            this.setBorrowedBooksFromRemote(Array.isArray(data.borrowedBooks) ? data.borrowedBooks : []);
 
             // 處理博幼藏書資料
             if (data.boyouBooks && typeof data.boyouBooks === 'object') {
@@ -1233,12 +1498,29 @@ class LibrarySystem {
         try {
             if (!silent) this.showToast('正在上傳到 Google Sheets...', 'info');
             const boyouBooks = JSON.parse(localStorage.getItem('lib_boyou_books_v1') || 'null') || {};
+
+            // 去重：根據書籍 ID 移除重複項
+            const bookMap = new Map();
+            (Array.isArray(this.books) ? this.books : []).forEach(book => {
+                if (book.id && !bookMap.has(book.id)) {
+                    bookMap.set(book.id, book);
+                }
+            });
+            const deduplicatedBooks = Array.from(bookMap.values());
+
+            // 確保每本書都有 series 與 createdAt 欄位
+            const normalizedBooks = deduplicatedBooks.map(b => ({
+                ...b,
+                series: b.series || '',
+                createdAt: b.createdAt || b.addedAt || ''
+            }));
+
             const response = await fetch(url, {
                 method: 'POST',
                 body: JSON.stringify({
                     action: 'push',
                     payload: {
-                        books: this.books,
+                        books: normalizedBooks,
                         borrowedBooks: this.borrowedBooks,
                         boyouBooks
                     }
@@ -1252,6 +1534,9 @@ class LibrarySystem {
             }
 
             if (result && result.ok) {
+                // 上傳成功後，更新版本信息
+                this.updateBookListVersion();
+                
                 if (!silent) this.showToast('上傳完成', 'success');
             } else {
                 if (!silent) this.showToast('上傳完成，但回應格式不符', 'warning');
@@ -1311,7 +1596,17 @@ class LibrarySystem {
                 }
             });
             this.books = Array.from(bookMap.values());
-            this.borrowedBooks = data.borrowedBooks;
+
+            // 如果遠端沒有借閱資料但本機已有資料，保留本機借閱資料
+            if (Array.isArray(data.borrowedBooks) && data.borrowedBooks.length === 0) {
+                if (Array.isArray(this.borrowedBooks) && this.borrowedBooks.length > 0) {
+                    console.log('[pullFromGoogleSheets] 收到空的遠端借閱清單，保留本機借閱資料');
+                } else {
+                    this.borrowedBooks = [];
+                }
+            } else {
+                this.borrowedBooks = data.borrowedBooks;
+            }
 
             if (data.boyouBooks && typeof data.boyouBooks === 'object') {
                 localStorage.setItem('lib_boyou_books_v1', JSON.stringify(data.boyouBooks));
@@ -1342,7 +1637,34 @@ class LibrarySystem {
         }
 
         try {
-            console.log('開始從 Google Sheets 自動載入書籍資料...');
+            // 記錄載入前本機是否已有書籍，用來判斷是否為首次匯入
+            const hadLocalBooks = Array.isArray(this.books) && this.books.length > 0;
+            // 檢查是否應該從雲端更新書單
+            console.log('正在檢查書單是否需要更新...');
+            const shouldUpdate = await this.checkShouldUpdateBookList();
+            
+            if (!shouldUpdate) {
+                // 不需要更新，嘗試從快取加載
+                console.log('[快取策略] 不需要更新，嘗試從快取加載');
+                const cachedBooks = this.loadBookListCache();
+                if (cachedBooks && cachedBooks.length > 0) {
+                    this.books = cachedBooks;
+                    // 從本地 localStorage 加載借閱資料（不變）
+                    this.borrowedBooks = JSON.parse(localStorage.getItem('lib_borrowed_v1') || '[]');
+                    this.lastUpdateTime = new Date();
+                    this.updateLastUpdateDisplay();
+                    console.log(`[快取策略] 成功加載快取書籍 ${this.books.length} 本`);
+                    this.showToast(`已加載快取書籍 ${this.books.length} 本`, 'info');
+                    return;
+                } else {
+                    // 快取不存在，需要下載
+                    console.log('[快取策略] 快取不存在，需要從雲端下載');
+                }
+            }
+            
+            // 需要從雲端更新書單
+            console.log('[快取策略] 開始從 Google Sheets 下載書單');
+            this.showToast('正在同步書單...', 'info');
             
             const response = await fetch(url, {
                 method: 'POST',
@@ -1352,6 +1674,19 @@ class LibrarySystem {
             const result = await response.json().catch(() => null);
             if (!response.ok || !result || !result.ok) {
                 console.log('Google Sheets 載入失敗:', result?.error || '未知錯誤');
+                
+                // 如果雲端失敗，嘗試從快取加載
+                console.log('[快取策略] 雲端加載失敗，嘗試從快取加載');
+                const cachedBooks = this.loadBookListCache();
+                if (cachedBooks && cachedBooks.length > 0) {
+                    this.books = cachedBooks;
+                    this.borrowedBooks = JSON.parse(localStorage.getItem('lib_borrowed_v1') || '[]');
+                    this.lastUpdateTime = new Date();
+                    this.updateLastUpdateDisplay();
+                    this.showToast(`雲端同步失敗，已加載快取書籍 ${this.books.length} 本`, 'warning');
+                    return;
+                }
+                
                 this.showToast('Google Sheets 載入失敗，嘗試載入本地 CSV 檔案...', 'warning');
                 // 當 Google Sheets 失敗時，自動載入本地 CSV 檔案
                 await this.autoLoadCSV();
@@ -1361,6 +1696,19 @@ class LibrarySystem {
             const data = result.data || {};
             if (!Array.isArray(data.books)) {
                 console.log('Google Sheets 資料格式不正確');
+                
+                // 如果雲端格式錯誤，嘗試從快取加載
+                console.log('[快取策略] 雲端資料格式不正確，嘗試從快取加載');
+                const cachedBooks = this.loadBookListCache();
+                if (cachedBooks && cachedBooks.length > 0) {
+                    this.books = cachedBooks;
+                    this.borrowedBooks = JSON.parse(localStorage.getItem('lib_borrowed_v1') || '[]');
+                    this.lastUpdateTime = new Date();
+                    this.updateLastUpdateDisplay();
+                    this.showToast(`雲端資料格式錯誤，已加載快取書籍 ${this.books.length} 本`, 'warning');
+                    return;
+                }
+                
                 this.showToast('Google Sheets 資料格式錯誤，嘗試載入本地 CSV 檔案...', 'warning');
                 // 當資料格式錯誤時，自動載入本地 CSV 檔案
                 await this.autoLoadCSV();
@@ -1378,16 +1726,44 @@ class LibrarySystem {
                 }
             });
             this.books = Array.from(bookMap.values());
-            this.borrowedBooks = data.borrowedBooks || [];
-            
+
+            // 如果遠端沒有借閱資料但本機已有資料，保留本機借閱資料
+            if (Array.isArray(data.borrowedBooks) && data.borrowedBooks.length === 0) {
+                if (Array.isArray(this.borrowedBooks) && this.borrowedBooks.length > 0) {
+                    console.log('[autoLoadFromGoogleSheets] 收到空的遠端借閱清單，保留本機借閱資料');
+                } else {
+                    this.borrowedBooks = [];
+                }
+            } else {
+                this.borrowedBooks = data.borrowedBooks || [];
+            }
+
             // 處理博幼藏書
             const boyouBooks = data.boyouBooks || {};
             localStorage.setItem('lib_boyou_books_v1', JSON.stringify(boyouBooks));
+
+            // 保存快取
+            this.saveBookListCache(this.books, this.borrowedBooks);
+            
+            // 更新版本信息
+            const remoteVersion = data.version || new Date().toISOString();
+            this.updateBookListVersion(remoteVersion);
 
             this.saveData();
             this.lastUpdateTime = new Date();
             this.updateLastUpdateDisplay();
             
+            // 若原本本機沒有書籍、此次從雲端成功載入書籍，視為首次匯入，才觸發同步
+            if (!hadLocalBooks && Array.isArray(this.books) && this.books.length > 0) {
+                try {
+                    localStorage.setItem('lib_initial_import_done', '1');
+                    // 使用 action 'addBook' 作為變更類別觸發同步
+                    this.triggerSyncForAction('addBook');
+                } catch (e) {
+                    console.error('首次匯入後觸發同步失敗:', e);
+                }
+            }
+
             if (this.books.length > 0) {
                 console.log(`成功從 Google Sheets 載入 ${this.books.length} 本書籍`);
                 this.showToast(`已從 Google Sheets 載入 ${this.books.length} 本書籍`, 'success');
@@ -1400,6 +1776,19 @@ class LibrarySystem {
 
         } catch (error) {
             console.error('自動從 Google Sheets 載入失敗:', error);
+            
+            // 如果出錯，嘗試從快取加載
+            console.log('[快取策略] 自動載入失敗，嘗試從快取加載');
+            const cachedBooks = this.loadBookListCache();
+            if (cachedBooks && cachedBooks.length > 0) {
+                this.books = cachedBooks;
+                this.borrowedBooks = JSON.parse(localStorage.getItem('lib_borrowed_v1') || '[]');
+                this.lastUpdateTime = new Date();
+                this.updateLastUpdateDisplay();
+                this.showToast(`同步失敗，已加載快取書籍 ${this.books.length} 本`, 'warning');
+                return;
+            }
+            
             this.showToast('Google Sheets 載入失敗，嘗試載入本地 CSV 檔案...', 'warning');
             // 當發生錯誤時，自動載入本地 CSV 檔案
             await this.autoLoadCSV();
@@ -1438,8 +1827,35 @@ class LibrarySystem {
         }
     }
 
-
-
+    /**
+     * 重新整理書單 - 提供給普通用戶的快捷按鈕
+     * 清除快取，強制從雲端重新下載最新書單
+     * 不需要管理員權限
+     */
+    async refreshBookList() {
+        try {
+            this.showToast('正在重新整理書單...', 'info');
+            this.showLoadingIndicator(true);
+            
+            console.log('[使用者操作] 重新整理書單 - 清除快取');
+            // 清除快取，強制重新下載
+            this.clearBookListCache();
+            
+            // 從雲端重新載入書單
+            await this.autoLoadFromGoogleSheets();
+            
+            this.renderBooks();
+            this.renderBorrowedBooks();
+            this.updateStats();
+            this.showLoadingIndicator(false);
+            
+            this.showToast('書單已重新整理', 'success');
+        } catch (error) {
+            console.error('重新整理書單失敗:', error);
+            this.showLoadingIndicator(false);
+            this.showToast('重新整理失敗，請檢查網路連線', 'error');
+        }
+    }
 
     // 解析 CSV 文字
     parseCSV(csvText) {
@@ -1565,6 +1981,35 @@ class LibrarySystem {
         
         // 自動上傳到 Google Sheets
         this.autoSyncToGoogleSheets();
+    }
+
+    // 安全地從遠端資料設定借閱清單：避免遠端空陣列覆蓋本機已有資料
+    setBorrowedBooksFromRemote(remoteBorrowed) {
+        try {
+            if (!Array.isArray(remoteBorrowed)) return;
+
+            // 如果遠端沒有任何紀錄但本機已有資料，保留本機資料
+            if (remoteBorrowed.length === 0) {
+                if (Array.isArray(this.borrowedBooks) && this.borrowedBooks.length > 0) {
+                    console.log('[borrow] 收到空的遠端借閱清單，保留本機借閱資料');
+                    return;
+                }
+                this.borrowedBooks = [];
+                return;
+            }
+
+            // 若遠端有資料，合併遠端與本機，避免重複（以 id 為準）
+            const map = new Map();
+            (Array.isArray(this.borrowedBooks) ? this.borrowedBooks : []).forEach(b => {
+                if (b && b.id) map.set(b.id, b);
+            });
+            remoteBorrowed.forEach(rb => {
+                if (rb && rb.id) map.set(rb.id, rb);
+            });
+            this.borrowedBooks = Array.from(map.values());
+        } catch (e) {
+            console.error('setBorrowedBooksFromRemote error:', e);
+        }
     }
 
     // 自動同步到 Google Sheets
@@ -2080,24 +2525,9 @@ class LibrarySystem {
                 this.showToast(`偵測到相同書名，已自動套用書籍資料`, 'info');
             }
 
-            // 偵測相似套書格式
-            const similarSeries = this.findSimilarSeriesBook(title);
-            if (similarSeries) {
-                const confirmed = confirm(
-                    `偵測到這本可能是同一套書。\n\n` +
-                    `上一次編書格式：\n${similarSeries.similarBook.title}\n\n` +
-                    `這次書名：\n${title}\n\n` +
-                    `是否要設定為同一套書：${similarSeries.seriesName}？`
-                );
-
-                if (confirmed) {
-                    // 自動填入套書欄位
-                    const seriesEl = document.getElementById('book-series');
-                    if (seriesEl) {
-                        seriesEl.value = similarSeries.seriesName;
-                    }
-                }
-            }
+            // 讀取使用者輸入的系列書名稱
+            const seriesEl = document.getElementById('book-series');
+            const seriesName = (seriesEl?.value || '').trim();
 
             const genre = this.getGenreFromId(id);
             const newBook = {
@@ -2114,11 +2544,19 @@ class LibrarySystem {
                 createdAt: new Date().toISOString()
             };
 
+            // 如果使用者輸入了系列書名稱，就保存到書籍對象
+            if (seriesName) {
+                newBook.series = seriesName;
+            }
+
             this.books.push(newBook);
             this.saveData();
             // 新增館藏後也自動同步到 Google Sheets
-            this.scheduleAutoSync();
-            this.pushToGoogleSheetsNow();
+            this.triggerSyncForAction('addBook');
+            
+            // 更新書單版本，讓快取失效
+            this.updateBookListVersion();
+            
             this.renderBooks();
             this.updateStats();
 
@@ -2356,23 +2794,33 @@ class LibrarySystem {
         // 處理系列書籍（至少2本才算系列）
         seriesMap.forEach((seriesBooks, seriesName) => {
             if (seriesBooks.length >= 2) {
-                // 系列內書籍排序：優先考慮新書，然後按書名排序
+                // 系列內書籍排序：嘗試把系列「第一本」放在最前面
+                // 1) 若書名含數字（例如卷/冊/號），依數字升冪排序（1、2、3...），
+                // 2) 否則若有 createdAt（或 addedAt）欄位，依時間升冪排序（較早的在前），
+                // 3) 最後退回到書名排序
                 seriesBooks.sort((a, b) => {
-                    // 優先處理新書：最近新增的書籍放在最前面
-                    const aAddedAt = Number(a.addedAt) || 0;
-                    const bAddedAt = Number(b.addedAt) || 0;
-                    const aIsNew = !!a.isNew && aAddedAt > 0;
-                    const bIsNew = !!b.isNew && bAddedAt > 0;
-                    
-                    // 如果其中一本是新書，按 addedAt 降序排列（最新的在前）
-                    if (aIsNew || bIsNew) {
-                        if (aIsNew && !bIsNew) return -1; // a 是新書，排在前面
-                        if (!aIsNew && bIsNew) return 1;  // b 是新書，排在前面
-                        // 兩本都是新書，按 addedAt 降序排列
-                        return bAddedAt - aAddedAt;
+                    // 嘗試從書名擷取數字索引
+                    const extractIndex = (title) => {
+                        if (!title) return NaN;
+                        const m = String(title).match(/(\d{1,4})/);
+                        if (m) return parseInt(m[1], 10);
+                        return NaN;
+                    };
+
+                    const aIdx = extractIndex(a.title);
+                    const bIdx = extractIndex(b.title);
+                    if (!Number.isNaN(aIdx) && !Number.isNaN(bIdx)) {
+                        if (aIdx !== bIdx) return aIdx - bIdx; // 升冪，第一冊 (1) 在前
                     }
-                    
-                    // 如果都不是新書，或者 addedAt 相同，則按書名排序
+
+                    // 若無明確數字索引，使用 createdAt/addedAt 升冪（較早的視為第一本）
+                    const aTime = new Date(a.createdAt || a.addedAt || 0).getTime();
+                    const bTime = new Date(b.createdAt || b.addedAt || 0).getTime();
+                    if (aTime && bTime && aTime !== bTime) {
+                        return aTime - bTime; // 較早的在前
+                    }
+
+                    // 最後依書名排序
                     return this.smartTitleSort(a.title, b.title, sortOrder);
                 });
                 sortedBooks.push(...seriesBooks);
@@ -2635,9 +3083,8 @@ class LibrarySystem {
         book.availableCopies--;
 
         this.saveData();
-        // 所有使用者：借閱成功後自動上傳借閱記錄到 Google Sheets
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        // 借閱不觸發館藏同步（僅保留本機變更）
+        this.triggerSyncForAction('borrow');
         this.renderBooks();
         this.renderBorrowedBooks();
         this.updateStats();
@@ -2665,9 +3112,8 @@ class LibrarySystem {
         }
 
         this.saveData();
-        // 所有使用者：歸還成功後自動上傳借閱記錄到 Google Sheets
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        // 歸還不觸發館藏同步
+        this.triggerSyncForAction('return');
         this.renderBooks();
         this.renderBorrowedBooks();
         this.updateStats();
@@ -2704,6 +3150,13 @@ class LibrarySystem {
         const genreFilter = document.getElementById('genre-filter').value;
         const sortBy = document.getElementById('sort-by').value;
         const sortOrder = document.getElementById('sort-order').value;
+
+        // 重置虛擬滾動狀態
+        this.virtualScrollState = {
+            loadedCount: 0,
+            batchSize: 50,
+            isLoading: false
+        };
 
         // 書碼精準搜尋：支援多個書碼（逗號/空白分隔）
         const codeTokens = (normalizedSearchTerm || '')
@@ -2843,15 +3296,21 @@ class LibrarySystem {
         const seriesNames = Object.keys(groupedBooks);
 
         // 分成系列書和單本書兩個區塊
+        // 邏輯：
+        // 1. 如果書籍有顯式 series 屬性，顯示為系列書
+        // 2. 如果書籍沒有 series 屬性，顯示為單本書
         const seriesBooks = [];
         const standaloneBooks = [];
 
         seriesNames.forEach(seriesName => {
             const seriesBooksList = groupedBooks[seriesName];
-            if (seriesBooksList.length >= 2) {
-                seriesBooks.push({ seriesName, books: seriesBooksList });
+
+            // 如果系列名稱是「單本書」，則全部歸類為單本書
+            if (seriesName === '單本書') {
+                standaloneBooks.push(...seriesBooksList);
             } else {
-                standaloneBooks.push(seriesBooksList[0]);
+                // 有 series 屬性的書歸類為系列書
+                seriesBooks.push({ seriesName, books: seriesBooksList });
             }
         });
 
@@ -2864,7 +3323,7 @@ class LibrarySystem {
             if (seriesBooks.length > 0) {
                 html += seriesBooks.map(({ seriesName, books: seriesBooksList }, index) => {
                     const totalBooks = seriesBooksList.length;
-                    const latestBook = seriesBooksList[0]; // 已經按時間排序，第一本是最新的
+                    const latestBook = seriesBooksList[0]; // 已經按系列順序，第一本為系列第一本
                     const seriesId = `series-${index}`; // 使用索引避免特殊字符問題
 
                     const originalIndex = this.books.findIndex(b => b.id === latestBook.id);
@@ -2901,19 +3360,213 @@ class LibrarySystem {
         } else {
             // 單本書區塊
             if (standaloneBooks.length > 0) {
-                html += '<div class="books-grid">';
-                html += standaloneBooks.map(book => {
+                const gridClass = isGridView ? 'books-grid' : 'books-list';
+                html += `<div class="${gridClass}" id="standalone-books-grid">`;
+                // 只渲染前 batchSize 本書
+                const booksToRender = standaloneBooks.slice(0, this.virtualScrollState.batchSize);
+                this.virtualScrollState.loadedCount = booksToRender.length;
+                html += booksToRender.map(book => {
                     const originalIndex = this.books.findIndex(b => b.id === book.id);
                     const isLegacy = originalIndex >= 0 && originalIndex < 1493;
                     return this.createBookCard(book, isLegacy);
                 }).join('');
                 html += '</div>';
+
+                // 如果還有更多書籍，顯示「加載更多」按鈕
+                if (standaloneBooks.length > this.virtualScrollState.loadedCount) {
+                    html += `
+                        <div class="load-more-container" style="text-align: center; padding: 20px;">
+                            <button class="btn btn-primary" id="load-more-btn" onclick="library.loadMoreBooks()">
+                                <i class="fas fa-plus"></i> 加載更多（還有 ${standaloneBooks.length - this.virtualScrollState.loadedCount} 本）
+                            </button>
+                        </div>
+                    `;
+                }
             } else {
                 html += '<div class="empty-state"><i class="fas fa-book"></i><h3>沒有單本書</h3><p>目前沒有符合條件的單本書籍</p></div>';
             }
         }
 
         container.innerHTML = html;
+    }
+
+    // 加載更多書籍
+    loadMoreBooks() {
+        if (this.virtualScrollState.isLoading) return;
+        this.virtualScrollState.isLoading = true;
+
+        const container = document.getElementById('standalone-books-grid');
+        const loadMoreBtn = document.getElementById('load-more-btn');
+
+        if (!container || !loadMoreBtn) {
+            this.virtualScrollState.isLoading = false;
+            return;
+        }
+
+        // 獲取當前的篩選條件
+        const rawSearchTerm = document.getElementById('search-input')?.value || '';
+        const normalizedSearchTerm = (rawSearchTerm || '').trim();
+        const searchTerm = normalizedSearchTerm.toLowerCase();
+        const genreFilter = document.getElementById('genre-filter').value;
+        const sortBy = document.getElementById('sort-by').value;
+        const sortOrder = document.getElementById('sort-order').value;
+
+        // 書碼精準搜尋
+        const codeTokens = (normalizedSearchTerm || '')
+            .toUpperCase()
+            .split(/[\s,，]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        const isCodeSearch = codeTokens.length > 0 && codeTokens.every(t => /^[ABC]\d+$/.test(t));
+
+        let filteredBooks = this.books.filter(book => {
+            let matchesSearch;
+
+            if (!searchTerm) {
+                matchesSearch = true;
+            } else if (isCodeSearch) {
+                const mainId = String(book.id || '').toUpperCase();
+                const allIds = Array.isArray(book.bookIds)
+                    ? book.bookIds.map(id => String(id || '').toUpperCase())
+                    : [];
+                matchesSearch = codeTokens.some(code => code === mainId || allIds.includes(code));
+            } else {
+                matchesSearch =
+                    String(book.title || '').toLowerCase().includes(searchTerm) ||
+                    String(book.author || '').toLowerCase().includes(searchTerm) ||
+                    String(book.id || '').toLowerCase().includes(searchTerm) ||
+                    (book.bookIds && book.bookIds.some(id => String(id || '').toLowerCase().includes(searchTerm))) ||
+                    String(book.year ?? '').toLowerCase().includes(searchTerm) ||
+                    String(book.genre || '').toLowerCase().includes(searchTerm);
+            }
+
+            const matchesGenre = !genreFilter || this.matchesBookGenre(book, genreFilter);
+
+            return matchesSearch && matchesGenre;
+        });
+
+        // 合併相同書名的書籍
+        const mergedBooks = this.mergeBooksByTitle(filteredBooks);
+
+        // 合併後排序
+        mergedBooks.sort((a, b) => {
+            const timeA = new Date(a.createdAt || a.addedAt || 0).getTime();
+            const timeB = new Date(b.createdAt || b.addedAt || 0).getTime();
+            if (timeA !== timeB) {
+                return timeB - timeA;
+            }
+
+            if (sortBy === 'code') {
+                const aCode = String(a.id || '').toUpperCase();
+                const bCode = String(b.id || '').toUpperCase();
+                const aMatch = aCode.match(/^([ABC])(\d+)$/);
+                const bMatch = bCode.match(/^([ABC])(\d+)$/);
+
+                if (aMatch && bMatch) {
+                    const [, aLetter, aNumStr] = aMatch;
+                    const [, bLetter, bNumStr] = bMatch;
+
+                    if (aLetter !== bLetter) {
+                        return sortOrder === 'asc'
+                            ? aLetter.localeCompare(bLetter)
+                            : bLetter.localeCompare(aLetter);
+                    }
+
+                    const aNum = parseInt(aNumStr, 10);
+                    const bNum = parseInt(bNumStr, 10);
+                    if (!isNaN(aNum) && !isNaN(bNum)) {
+                        return sortOrder === 'asc' ? aNum - bNum : bNum - aNum;
+                    }
+                    return sortOrder === 'asc'
+                        ? aNumStr.localeCompare(bNumStr)
+                        : bNumStr.localeCompare(aNumStr);
+                }
+
+                return sortOrder === 'asc'
+                    ? aCode.localeCompare(bCode)
+                    : bCode.localeCompare(aCode);
+            }
+
+            const genreOrder = ['繪本', '橋梁書', '文字書'];
+            const aGenreIndex = genreOrder.indexOf(a.genre);
+            const bGenreIndex = genreOrder.indexOf(b.genre);
+            if (aGenreIndex !== bGenreIndex) {
+                return aGenreIndex - bGenreIndex;
+            }
+
+            let aVal = a[sortBy];
+            let bVal = b[sortBy];
+            if (sortBy === 'year') {
+                aVal = parseInt(aVal);
+                bVal = parseInt(bVal);
+            } else if (sortBy === 'title') {
+                return this.smartTitleSort(a.title, b.title, sortOrder);
+            } else {
+                aVal = aVal.toString().toLowerCase();
+                bVal = bVal.toString().toLowerCase();
+            }
+
+            if (sortOrder === 'asc') {
+                return aVal > bVal ? 1 : -1;
+            }
+            return aVal < bVal ? 1 : -1;
+        });
+
+        // 按系列分組顯示
+        const sortedBooks = this.sortBooksWithSeries(mergedBooks, sortOrder);
+        const groupedBooks = this.groupBooksBySeries(sortedBooks);
+        const seriesNames = Object.keys(groupedBooks);
+
+        // 分成系列書和單本書兩個區塊
+        const seriesBooks = [];
+        const standaloneBooks = [];
+
+        seriesNames.forEach(seriesName => {
+            const seriesBooksList = groupedBooks[seriesName];
+
+            if (seriesName === '單本書') {
+                standaloneBooks.push(...seriesBooksList);
+            } else {
+                seriesBooks.push({ seriesName, books: seriesBooksList });
+            }
+        });
+
+        // 加載下一批書籍
+        const nextBatch = standaloneBooks.slice(
+            this.virtualScrollState.loadedCount,
+            this.virtualScrollState.loadedCount + this.virtualScrollState.batchSize
+        );
+
+        if (nextBatch.length === 0) {
+            loadMoreBtn.remove();
+            this.virtualScrollState.isLoading = false;
+            return;
+        }
+
+        // 追加新書籍到容器
+        const newBooksHtml = nextBatch.map(book => {
+            const originalIndex = this.books.findIndex(b => b.id === book.id);
+            const isLegacy = originalIndex >= 0 && originalIndex < 1493;
+            return this.createBookCard(book, isLegacy);
+        }).join('');
+
+        container.insertAdjacentHTML('beforeend', newBooksHtml);
+
+        // 確保容器類別正確
+        const isGridView = document.getElementById('grid-view').classList.contains('active');
+        container.className = isGridView ? 'books-grid' : 'books-list';
+
+        // 更新已加載數量
+        this.virtualScrollState.loadedCount += nextBatch.length;
+
+        // 更新或移除按鈕
+        if (standaloneBooks.length > this.virtualScrollState.loadedCount) {
+            loadMoreBtn.innerHTML = `<i class="fas fa-plus"></i> 加載更多（還有 ${standaloneBooks.length - this.virtualScrollState.loadedCount} 本）`;
+        } else {
+            loadMoreBtn.remove();
+        }
+
+        this.virtualScrollState.isLoading = false;
     }
 
     // 切換系列展開/收合
@@ -3193,12 +3846,12 @@ class LibrarySystem {
                         </div>` : ''}
                     </div>
                     <div class="book-actions">
-                        ${canBorrow ? 
+                        ${canBorrow ?
                             `<button class="btn btn-primary btn-small" onclick="library.borrowBook('${book.id}')">
                                 <i class="fas fa-book-reader"></i> ${userBorrowedCount > 0 ? '再借' : '借閱'}
-                            </button>` : 
+                            </button>` :
                             `<button class="btn btn-outline btn-small" disabled>
-                                <i class="fas fa-ban"></i> 無法借閱
+                                <i class="fas fa-ban"></i> 已借出
                             </button>`
                         }
                         ${canManageBooks ? `
@@ -3337,6 +3990,7 @@ class LibrarySystem {
         const coverInput = document.getElementById('edit-book-cover-url');
         const yearInput = document.getElementById('edit-book-year');
         const copiesInput = document.getElementById('edit-book-copies');
+        const seriesInput = document.getElementById('edit-book-series');
 
         // 清除之前的錯誤提示
         const errorDiv = document.getElementById('edit-book-id-error');
@@ -3361,6 +4015,11 @@ class LibrarySystem {
         if (coverInput) coverInput.value = book.coverUrl || '';
         if (yearInput) yearInput.value = book.year || this.settings.defaultYear;
         if (copiesInput) copiesInput.value = book.copies || 1;
+        
+        // 加載系列書名稱
+        if (seriesInput) {
+            seriesInput.value = book.series || '';
+        }
 
         if (modal) modal.style.display = 'block';
 
@@ -3781,25 +4440,6 @@ class LibrarySystem {
             return;
         }
 
-        // 偵測相似套書格式
-        const similarSeries = this.findSimilarSeriesBook(title);
-        if (similarSeries) {
-            const confirmed = confirm(
-                `偵測到這本可能是同一套書。\n\n` +
-                `上一次編書格式：\n${similarSeries.similarBook.title}\n\n` +
-                `這次書名：\n${title}\n\n` +
-                `是否要設定為同一套書：${similarSeries.seriesName}？`
-            );
-
-            if (confirmed) {
-                // 自動填入套書欄位
-                const seriesEl = document.getElementById('edit-book-series');
-                if (seriesEl) {
-                    seriesEl.value = similarSeries.seriesName;
-                }
-            }
-        }
-
         // 驗證新書碼格式
         if (!this.bookIdPattern.test(newId)) {
             this.showToast('書碼格式錯誤：請用 A/B/C + 數字（例：C0001）', 'error');
@@ -3838,6 +4478,36 @@ class LibrarySystem {
         book.copies = newCopies;
         book.availableCopies = newCopies - borrowedCount;
 
+        // 讀取使用者輸入的系列書名稱
+        const seriesEl = document.getElementById('edit-book-series');
+        const seriesName = (seriesEl?.value || '').trim();
+
+        // 更新系列書名稱
+        if (seriesName) {
+            book.series = seriesName;
+
+            // 如果這本書有多本（相同書名），自動套用套書名稱到其他相同書名的書籍
+            const sameTitleBooks = this.books.filter(b => b.title === title && b.id !== originalId);
+            if (sameTitleBooks.length > 0) {
+                sameTitleBooks.forEach(sameBook => {
+                    sameBook.series = seriesName;
+                });
+                this.showToast(`已自動套用套書名稱到 ${sameTitleBooks.length} 本相同書名的書籍`, 'info');
+            }
+        } else {
+            // 如果使用者清空了系列書名稱，則移除此欄位
+            delete book.series;
+
+            // 如果這本書有多本（相同書名），自動清空其他相同書名的書籍的套書名稱
+            const sameTitleBooks = this.books.filter(b => b.title === title && b.id !== originalId);
+            if (sameTitleBooks.length > 0) {
+                sameTitleBooks.forEach(sameBook => {
+                    delete sameBook.series;
+                });
+                this.showToast(`已自動清空 ${sameTitleBooks.length} 本相同書名的書籍的套書名稱`, 'info');
+            }
+        }
+
         // 更新書碼列表
         if (Array.isArray(book.bookIds)) {
             const index = book.bookIds.indexOf(oldId);
@@ -3872,6 +4542,20 @@ class LibrarySystem {
         }
 
         this.saveData();
+        // 若書籍物件有 series 屬性（確實被設為套書），切換至「系列書」分頁
+        try {
+            if (book && book.series) {
+                this.switchBookType('series');
+            }
+        } catch (e) {
+            console.error('切換至系列分頁失敗:', e);
+        }
+        // 更新書單版本，讓快取失效
+        this.updateBookListVersion();
+        
+        // 編輯書籍屬於動作變更，才觸發同步
+        this.triggerSyncForAction('editBook');
+        
         this.renderBooks();
         this.updateStats();
 
@@ -4164,6 +4848,13 @@ class LibrarySystem {
 
         this.books = this.books.filter(b => b.id !== book.id);
         this.saveData();
+        
+        // 更新書單版本，讓快取失效
+        this.updateBookListVersion();
+        
+        // 刪除書籍屬於動作變更，才觸發同步
+        this.triggerSyncForAction('deleteBook');
+        
         this.renderBooks();
         this.updateStats();
         this.showToast(`書籍「${book.title}」已刪除`, 'success');
@@ -5456,9 +6147,8 @@ class LibrarySystem {
         // 顯示結果
         this.showToast(`搜尋完成！成功: ${this.searchState.successCount}, 失敗: ${this.searchState.failCount}`, 'success');
         
-        // 自動同步到 Google Sheets
-        this.scheduleAutoSync();
-        this.pushToGoogleSheetsNow();
+        // 搜尋完成不會觸發館藏同步（若需要可改為 'bulkImport'）
+        this.triggerSyncForAction('search');
     }
 
     // 搜尋書籍作者

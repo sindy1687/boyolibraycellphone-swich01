@@ -64,11 +64,13 @@ function writeBooks_(books) {
   const sh = getSheet_('Books');
   sh.clearContents();
 
-  const header = ['id', 'title', 'author', 'coverUrl', 'coverImage', 'genre', 'year', 'copies', 'availableCopies', 'bookIds'];
+  const header = ['id', 'title', 'author', 'coverUrl', 'coverImage', 'genre', 'year', 'copies', 'availableCopies', 'series', 'createdAt', 'bookIds'];
   const rows = books.map(b => {
     const bookIds = Array.isArray(b.bookIds) ? b.bookIds.join(',') : '';
     const coverUrl = b.coverUrl || '';
     const coverImage = coverUrl ? '=IMAGE("' + coverUrl + '")' : '';
+    const series = b.series || '';
+    const createdAt = b.createdAt || b.addedAt || '';
     return [
       b.id || '',
       b.title || '',
@@ -79,6 +81,8 @@ function writeBooks_(books) {
       Number(b.year || 0),
       Number(b.copies || 0),
       Number(b.availableCopies || 0),
+      series,
+      createdAt,
       bookIds
     ];
   });
@@ -91,9 +95,15 @@ function writeBooks_(books) {
 
 function readBooks_() {
   const sh = getSheet_('Books');
-  const values = sh.getDataRange().getValues();
-  if (values.length <= 1) return [];
-
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  
+  // 如果只有標題行或沒有資料，返回空陣列
+  if (lastRow <= 1) return [];
+  
+  // 明確指定讀取範圍，確保讀取所有資料
+  const values = sh.getRange(1, 1, lastRow, lastCol).getValues();
+  
   const header = values[0];
   const idx = indexMap_(header);
 
@@ -118,6 +128,8 @@ function readBooks_() {
       year: Number(row[idx.year] || 0),
       copies: Number(row[idx.copies] || 0),
       availableCopies: Number(row[idx.availableCopies] || 0),
+      series: String(row[idx.series] || ''),
+      createdAt: String(row[idx.createdAt] || '')
     };
     if (bookIds) obj.bookIds = bookIds;
 
@@ -220,7 +232,9 @@ function indexMap_(headerRow) {
     year: map.year ?? 6,
     copies: map.copies ?? 7,
     availableCopies: map.availableCopies ?? 8,
-    bookIds: map.bookIds ?? 9,
+    series: map.series ?? 9,
+    createdAt: map.createdAt ?? 10,
+    bookIds: map.bookIds ?? 11,
 
     bookId: map.bookId ?? 1,
     bookTitle: map.bookTitle ?? 2,
