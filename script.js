@@ -3338,18 +3338,20 @@ class LibrarySystem {
                                     <span class="series-count">（${totalBooks} 本）</span>
                                 </h3>
                             </div>
-                            <div class="series-books" id="${seriesId}">
+                            <div class="series-actions">
+                                <button class="btn btn-outline btn-sm series-expand-btn" onclick="library.toggleSeries('${seriesId}')">
+                                    展開全部 ${totalBooks} 本
+                                </button>
+                            </div>
+                            <div class="series-books books-grid" id="${seriesId}">
                                 ${this.createBookCard(latestBook, isLegacy)}
-                                <div class="series-more-books" id="${seriesId}-more">
+                                <div class="series-more-books" id="${seriesId}-more" style="display: none;">
                                     ${seriesBooksList.slice(1).map(book => {
                                         const idx = this.books.findIndex(b => b.id === book.id);
                                         const legacy = idx >= 0 && idx < 1493;
                                         return this.createBookCard(book, legacy);
                                     }).join('')}
                                 </div>
-                                <button class="btn btn-outline btn-sm series-expand-btn" onclick="library.toggleSeries('${seriesId}')">
-                                    展開全部 ${totalBooks} 本
-                                </button>
                             </div>
                         </div>
                     `;
@@ -3360,8 +3362,6 @@ class LibrarySystem {
         } else {
             // 單本書區塊
             if (standaloneBooks.length > 0) {
-                const gridClass = isGridView ? 'books-grid' : 'books-list';
-                html += `<div class="${gridClass}" id="standalone-books-grid">`;
                 // 只渲染前 batchSize 本書
                 const booksToRender = standaloneBooks.slice(0, this.virtualScrollState.batchSize);
                 this.virtualScrollState.loadedCount = booksToRender.length;
@@ -3370,7 +3370,6 @@ class LibrarySystem {
                     const isLegacy = originalIndex >= 0 && originalIndex < 1493;
                     return this.createBookCard(book, isLegacy);
                 }).join('');
-                html += '</div>';
 
                 // 如果還有更多書籍，顯示「加載更多」按鈕
                 if (standaloneBooks.length > this.virtualScrollState.loadedCount) {
@@ -3395,7 +3394,7 @@ class LibrarySystem {
         if (this.virtualScrollState.isLoading) return;
         this.virtualScrollState.isLoading = true;
 
-        const container = document.getElementById('standalone-books-grid');
+        const container = document.getElementById('books-container');
         const loadMoreBtn = document.getElementById('load-more-btn');
 
         if (!container || !loadMoreBtn) {
@@ -3550,11 +3549,12 @@ class LibrarySystem {
             return this.createBookCard(book, isLegacy);
         }).join('');
 
-        container.insertAdjacentHTML('beforeend', newBooksHtml);
-
-        // 確保容器類別正確
-        const isGridView = document.getElementById('grid-view').classList.contains('active');
-        container.className = isGridView ? 'books-grid' : 'books-list';
+        const loadMoreContainer = loadMoreBtn.parentElement;
+        if (loadMoreContainer && loadMoreContainer.parentElement === container) {
+            loadMoreContainer.insertAdjacentHTML('beforebegin', newBooksHtml);
+        } else {
+            container.insertAdjacentHTML('beforeend', newBooksHtml);
+        }
 
         // 更新已加載數量
         this.virtualScrollState.loadedCount += nextBatch.length;
@@ -3573,10 +3573,10 @@ class LibrarySystem {
     toggleSeries(seriesId) {
         const moreBooks = document.getElementById(`${seriesId}-more`);
         const icon = document.getElementById(`${seriesId}-icon`);
-        const btn = document.querySelector(`#${seriesId} .series-expand-btn`);
+        const btn = document.querySelector(`.series-expand-btn`);
 
         if (moreBooks.style.display === 'none') {
-            moreBooks.style.display = 'grid';
+            moreBooks.style.display = 'flex';
             icon.className = 'fas fa-chevron-down series-toggle-icon';
             btn.textContent = `收起`;
         } else {
@@ -3804,7 +3804,7 @@ class LibrarySystem {
         const canManageBooks = this.isAdminUser();
 
         return `
-            <div class="book-card genre-${book.genre} ${availableCopies === 0 ? 'borrowed' : ''} ${isMerged ? 'merged' : ''}">
+            <div class="book-card genre-${book.genre} ${availableCopies === 0 ? 'borrowed' : ''} ${isMerged ? 'merged' : ''}" data-book-id="${this.escapeHtml(book.id)}">
                 <div class="book-cover">
                     ${this.isAllowedCoverUrl(book.coverUrl) ? 
                         `<img src="${book.coverUrl}" alt="${book.title}" class="book-cover-img" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -3869,6 +3869,22 @@ class LibrarySystem {
                 </div>
             </div>
         `;
+    }
+
+    refreshBookCardInPlace(book, previousId = null) {
+        const cardSelector = previousId
+            ? `.book-card[data-book-id="${CSS.escape(previousId)}"]`
+            : `.book-card[data-book-id="${CSS.escape(book.id)}"]`;
+        const currentCard = document.querySelector(cardSelector);
+        if (!currentCard) return false;
+
+        const replacement = document.createElement('div');
+        replacement.innerHTML = this.createBookCard(book).trim();
+        const nextCard = replacement.firstElementChild;
+        if (!nextCard) return false;
+
+        currentCard.replaceWith(nextCard);
+        return true;
     }
 
     showEditBookModal(bookId) {
@@ -4418,6 +4434,9 @@ class LibrarySystem {
         e.preventDefault();
         if (!this.requireAdmin('編輯書籍')) return;
 
+        const preservedScrollY = window.scrollY || window.pageYOffset || 0;
+        const preservedScrollX = window.scrollX || window.pageXOffset || 0;
+
         const originalId = (document.getElementById('edit-book-original-id')?.value || '').trim();
         const editIdInput = document.getElementById('edit-book-id');
         const newId = (editIdInput?.value || '').trim().toUpperCase();
@@ -4542,25 +4561,25 @@ class LibrarySystem {
         }
 
         this.saveData();
-        // 若書籍物件有 series 屬性（確實被設為套書），切換至「系列書」分頁
-        try {
-            if (book && book.series) {
-                this.switchBookType('series');
-            }
-        } catch (e) {
-            console.error('切換至系列分頁失敗:', e);
-        }
         // 更新書單版本，讓快取失效
         this.updateBookListVersion();
-        
+
         // 編輯書籍屬於動作變更，才觸發同步
         this.triggerSyncForAction('editBook');
-        
-        this.renderBooks();
+
+        this.refreshBookCardInPlace(book, originalId);
         this.updateStats();
 
         const modal = document.getElementById('edit-book-modal');
         if (modal) modal.style.display = 'none';
+
+        requestAnimationFrame(() => {
+            window.scrollTo({
+                top: preservedScrollY,
+                left: preservedScrollX,
+                behavior: 'auto'
+            });
+        });
         
         const message = newId !== originalId ? 
             `書籍已更新，書碼已從 ${originalId} 變更為 ${newId}` : 
@@ -5059,6 +5078,85 @@ class LibrarySystem {
         // 如果切換到副管理者標籤，渲染副管理者列表
         if (tabName === 'sub-admin') {
             this.renderSubAdminList();
+        }
+    }
+
+    // 自動補齊書籍空白資料
+    async autoFillBookData() {
+        if (!this.requireAdmin('資料補齊')) return;
+
+        const url = this.getGoogleWebAppUrl();
+        if (!url) {
+            this.showToast('請先設定 Google Sheets 同步網址', 'error');
+            return;
+        }
+
+        const limitInput = document.getElementById('auto-fill-limit');
+        const limit = limitInput ? Number(limitInput.value) || 10 : 10;
+
+        const resultBox = document.getElementById('auto-fill-result');
+        if (resultBox) {
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> 正在補齊書籍資料...</p>';
+        }
+
+        try {
+            this.showToast('正在補齊書籍資料...', 'info');
+
+            const response = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'autoFillBookData',
+                    options: { limit }
+                })
+            });
+
+            const result = await response.json().catch(() => null);
+            if (!response.ok || !result || !result.ok) {
+                throw new Error('補齊失敗：' + (result?.error || '未知錯誤'));
+            }
+
+            const data = result.result || {};
+            const message = data.message || '補齊完成';
+
+            this.showToast(message, data.success > 0 ? 'success' : 'warning');
+
+            if (resultBox) {
+                let html = `
+                    <div class="result-summary">
+                        <p><strong>${message}</strong></p>
+                        <ul>
+                            <li>成功補齊：${data.success} 本</li>
+                            <li>跳過：${data.skipped} 本</li>
+                            <li>錯誤：${data.errors} 本</li>
+                        </ul>
+                    </div>
+                `;
+
+                if (data.errorDetails && data.errorDetails.length > 0) {
+                    html += '<div class="error-details"><h4>錯誤詳情：</h4><ul>';
+                    data.errorDetails.forEach(err => {
+                        html += `<li>${err.id || err.title || '未知'}: ${err.error}</li>`;
+                    });
+                    html += '</ul></div>';
+                }
+
+                resultBox.innerHTML = html;
+            }
+
+            // 補齊後重新載入資料
+            if (data.success > 0) {
+                setTimeout(() => {
+                    this.pullFromGoogleSheets({ silent: true });
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('補齊失敗:', error);
+            this.showToast('補齊失敗：' + error.message, 'error');
+
+            if (resultBox) {
+                resultBox.innerHTML = `<p class="error"><i class="fas fa-exclamation-circle"></i> 補齊失敗：${error.message}</p>`;
+            }
         }
     }
 
